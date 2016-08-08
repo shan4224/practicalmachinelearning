@@ -1,0 +1,607 @@
+---
+title: "Final Project Report - Practical Machine Learning"
+author: "Shan"
+date: "August 7, 2016"
+output: html_document
+---
+
+####***Introduction***
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+####***Data Sources***
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+####***Reproducibility***
+In order to reproduce the same results, certain set of packages need to be installed, as well as setting a pseudo random seed equal to one which has been used here. 
+*Note:To install the caret package in R, run : install.packages("caret")
+
+The following Libraries were used for this project, should be installed and loaded in working environment.
+
+```{r}
+library(caret)
+library(gbm)
+library(ipred)
+library(xgboost)
+```
+
+####***Getting the data***
+
+The training data set can be found on the following URL:
+
+```{r}
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+```
+
+The testing data set can be found on the following URL:
+
+```{r}
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+```
+
+***Load the Data***
+
+The train and test data is loaded in the following steps.
+The data can be loaded through url function directly or it can be loaded from local folder.
+In case of loading from local folder path of working directory has to be set appropriately.
+"NA","#DIV/0!","" data cells are considered as NA here.
+
+```{r}
+#train <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+#test <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+
+setwd("E:/SS/Coursera Data Science Specialization/Practical Machine Learning/Course Project")
+train <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+test  <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+```
+
+***Snapshot of Data***
+
+A snapshot of data for first 10 variables can be viewed by summary function.
+
+```{r}
+summary(train[,c(1:10)])
+summary(test[,c(1,10)])
+```
+
+####***Cleaning the data***
+
+Lets clean the data in the following steps
+Same modifications/ transformations should be applied to both train and test data.
+
+***Remove the variable column with NA values***
+
+Lets remove the columns with NA values as most of them have over 19000 of observations out of 19622 in train dataset as NA.
+
+
+```{r message=FALSE}
+options(warn=-1)
+# remove columns with NA
+ind <- 0
+for(i in 1:160){
+  ind[i] <-  ifelse(is.na(train[,i]), "yes","no")
+    }
+sel1 <- names(train)[which(ind=="no")]
+train1 <- train[,sel1]
+test1  <- test[,sel1[1:59]]
+```
+
+***Remove NearZeroVariance Variables***
+
+NearZeroVariance variables don't capture the pattern of data. So they can be identified and removed.
+
+```{r}
+# Selecting NearZeroVariance Variables
+NZVar <- nearZeroVar(train1, saveMetrics=TRUE)
+sel2 <- row.names(NZVar)[which(NZVar$nzv==FALSE)]
+```
+
+***Selecting the remaining variables***
+
+```{r}
+# Select the remaining variables
+train2 <- train1[, sel2]
+test2  <- test1 [, sel2[-59]] ## sel2[59] is the classe which is not present in test2 data
+```
+
+***Remove the ID variable***
+
+The ID variable should be removed from analysis.
+
+```{r}
+# Remove the id variable in first column
+train3  <- train2[,-1]
+test3   <- test2[,-1]
+```
+
+***converting train3$cvtd_timestamp to numeric. It has 20 levels***
+
+```{r}
+# converting train3$cvtd_timestamp to numeric 
+train3$cvtd_timestamp <- as.numeric(train3$cvtd_timestamp)
+test3$cvtd_timestamp  <- as.numeric(test3$cvtd_timestamp)
+```
+
+####***Cross-validation***
+
+Cross-validation will be performed by subsampling our training data set randomly . This is achieved by using 
+trainControl function in caret, where arguements method="cv" and number=5 is mentioned. This result in 5 fold cross-validation . The model is fitted on 4 folds of data and tested on remaining set. So effectively each fold get chance to act as test data. This help in better analysis and interpretation.
+
+####***Expected out-of-sample error***
+
+The summary of model fitted object shows out-of-sample error and accuracy. Accuracy means the proportion of test data correctly predicted by the model. Error is (1-Accuracy) proportion. Since, the model is fitted in cross-validation process several times, accuracy is displayed for each of the model. The best model is selected in final model, which is used for prediction.
+
+
+####***ML algorithms for prediction***
+
+Random forest , Boosting algorithms are known for their ability of detecting the features that are important for classification.
+
+
+***Model Random Forest***
+
+Random Forest algorithm is used here. Caret Package has implementation of Random Forest in method "ranger".
+Model is used on test3 data for prediction.
+
+```{r}
+# model Random Forest method "ranger" 
+set.seed(431)
+modRF <- train(classe ~ ., data=train3, method="ranger", trControl=trainControl(method="cv",number=5))
+# to see summary of model object and final model
+modRF
+modRF$finalModel
+
+# prediction
+predRF <- predict(modRF, newdata=test3)
+```
+
+***Model Boosting***
+
+Boosting algorithm is used here. Caret Package has implementation of Boosting in method "gbm".
+Model is used on test3 data for prediction.
+
+```{r message=FALSE}
+# model gbm method "gbm"
+set.seed(431)
+modgbm <- train(classe ~ ., data=train3, method="gbm", trControl=trainControl(method="cv",number=5))
+```
+
+
+```{r }
+# to see summary of model object and final model
+modgbm
+modgbm$finalModel
+# prediction
+predgbm <- predict(modgbm,newdata=test3)
+```
+
+
+***Model Bagging***
+
+Bagging algorithm is used here. Caret Package has implementation of Boosting in method "treebag".
+Model is used on test3 data for prediction.
+
+```{r}
+# model bagging method "treebag"
+set.seed(431)
+modbag  <- train(classe ~ ., data=train3, method="treebag", trControl=trainControl(method="cv",number=5))
+# to see summary of model object and final model
+modbag
+modbag$finalModel
+# prediction
+predbag <- predict(modbag,newdata=test3)
+```
+
+***Model extreme gradient boosting***
+
+Extreme gradient boosting algorithm is used here. Caret Package has implementation of Boosting in method "xgbtree".Model is used on test3 data for prediction.
+
+```{r}
+# model xgboost method "xgbTree"
+set.seed(431)
+modxgbTree  <- train(classe ~ ., data=train3, method="xgbTree", trControl=trainControl(method="cv",number=5))
+# to see summary of model object 
+modxgbTree 
+
+# prediction
+predxgbTree <- predict(modxgbTree ,newdata=test3)
+```
+
+Random Forest yielded better Results.
+
+Random Forest machine learning algorithm isapplied to the 20 test cases available in the test data . 
+
+####***Generating submission files***
+
+The Submission dataframe is generated and Submission.csv file is used for submission.
+
+```{r}
+Submission = data.frame(X= test$X, Predictions=predRF)
+write.csv(Submission, "Submission.csv", row.names=FALSE)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
